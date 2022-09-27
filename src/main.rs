@@ -8,6 +8,8 @@ fn get_plain_text() -> String {
     buffer
 }
 
+
+
 fn main() {
     let plain_text = get_plain_text();
     let letter_rule = |letter| rule::shift(letter, 3);

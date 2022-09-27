@@ -1,9 +1,5 @@
 use crate::z26::Letter;
 
-pub struct Rule {
-    encrypt: dyn Fn(String) -> String,
-}
-
 fn apply_letter_rule<F> (func: F, c: char) -> char 
 where
     F: FnOnce(Letter) -> Letter 
