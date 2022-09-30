@@ -2,12 +2,19 @@ use std::{char, fmt, ops};
 
 #[derive(Debug, Copy, Clone)]
 pub struct Letter {
-    value: u32,
+    value: u8,
 }
 
 impl From<u32> for Letter {
     fn from(val: u32) -> Self {
-        Letter { value: val % 26}
+        Letter { value: (val % 26).try_into().expect("26 < 2^8")}
+    }
+}
+
+
+impl From<i32> for Letter {
+    fn from(val: i32) -> Self {
+        Letter { value: (val % 26).try_into().expect("26 < 2^8")}
     }
 }
 
@@ -56,6 +63,17 @@ impl ops::Sub<Letter> for Letter {
         let rhs = rhs.value % 26;
         let lhs = self.value;
         let val = (26 + lhs - rhs) % 26;
+        Letter { value: val }
+    }
+}
+
+impl ops::Mul<Letter> for Letter {
+    type Output = Letter;
+
+    fn mul(self, rhs: Letter) -> Self::Output {
+        let rhs = rhs.value % 26;
+        let lhs = self.value;
+        let val = (lhs * rhs) % 26;
         Letter { value: val }
     }
 }
