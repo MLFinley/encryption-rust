@@ -1,4 +1,5 @@
 use std::io::{self, Read};
+use std::env;
 
 use crate::rule::get_rule;
 mod z26;
@@ -13,10 +14,11 @@ fn get_plain_text() -> String {
 
 
 fn main() {
-    let encryption_rule = match get_rule() {
+    let args: Vec<String> = env::args().collect();
+    let encryption_rule = match get_rule(args) {
         Ok(rule) => rule,
         Err(error) => {
-            dbg!(error);
+            println!("{}",error);
             std::process::exit(1)
         },
     };

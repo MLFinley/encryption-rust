@@ -1,56 +1,102 @@
-use std::env;
+use std::slice::Iter;
 
-use crate::z26::Letter;
+use crate::z26::{InvertableLetter, Letter};
 
-pub fn get_rule() -> Result<Box<dyn Fn(String) -> String>, &'static str> {
-    let args: Vec<String> = env::args().collect();
+enum CypherType {
+    Caeser(bool),
+    Shift(bool),
+    Affine(bool),
+    Vigenere,
+}
+
+fn get_cypher(cypher_name: &String) -> Result<CypherType, String> {
+    match cypher_name.as_str() {
+        "caeser" => Ok(CypherType::Caeser(false)),
+        "r_caeser" => Ok(CypherType::Caeser(true)),
+        "shift" => Ok(CypherType::Shift(false)),
+        "r_shift" => Ok(CypherType::Shift(true)),
+        "affine" => Ok(CypherType::Affine(false)),
+        "r_affine" => Ok(CypherType::Affine(true)),
+        "vigenere" => Ok(CypherType::Vigenere),
+        _ => Err(format!("Unsupported Cypher {}", cypher_name)),
+    }
+}
+
+pub fn get_rule(args: Vec<String>) -> Result<Box<dyn Fn(String) -> String>, String> {
     args.get(1)
-        .map(|a| a.as_str())
-        .ok_or("Must Specify Cypher Type")
-        .and_then(|my_type| match my_type {
-            "caeser" | "shift" | "r_caeser" | "r_shift" => if let "caeser" | "r_caeser" = my_type {
-                Ok(3)
-            } else {
-                args.get(2)
-                    .ok_or("Shift Requires Key")
-                    .and_then(|s| s.parse::<i32>().map_err(|_| "Key Must Be Int"))
-            }
-            .and_then(|key| {
-                Ok(if my_type.chars().nth(0).unwrap() == 'r' {
-                    key * -1
+        .ok_or(String::from("Must Specify Cypher Type"))
+        .and_then(|cypher_name| get_cypher(cypher_name))
+        .and_then(|cypher_type| match cypher_type {
+            CypherType::Caeser(reversed) | CypherType::Shift(reversed) => {
+                if matches!(cypher_type, CypherType::Caeser(_)) {
+                    Ok(3)
                 } else {
-                    key
+                    args.get(2)
+                        .ok_or(String::from("Shift Requires Key"))
+                        .and_then(|s| {
+                            s.parse::<i32>()
+                                .map_err(|_| String::from("Key Must Be Int"))
+                        })
+                }
+                .map(Letter::from)
+                .map(|key| if reversed { -key } else { key })
+                .map(|key| {
+                    let key_func = move |c| shift(c, key);
+                    letter_map(Box::new(key_func))
                 })
-            })
-            .and_then(|key| {
-                let key_func = move |c| -> Letter { shift(c, key) };
-                Ok(letter_map(Box::new(key_func)))
-            }),
-            "affine" => {
-                // let [a,b]] = <[&str; 3]>&args[2..=3];
-                args.get(2..=3)
-                    .ok_or("Affine Requires 2 Ints as key")
-                    .and_then(|num_strings| {
-                        num_strings
-                            .iter()
-                            .map(|s| s.parse::<i32>().map_err(|_| "Keys Must Be Ints"))
-                            .collect()
-                    })
-                    .and_then(|args: Vec<i32>| {
-                        <[i32; 2]>::try_from(args).map_err(|_| "Unknown Error")
-                    })
-                    .and_then(|args| {
-                        let [a, b] = args;
-                        let key_func = move |c| -> Letter { affine(c, a, b) };
-                        Ok(letter_map(key_func))
-                    })
-            },
-            
-            _ => Err("Unsupported Cypher"),
+            }
+
+            CypherType::Affine(reversed) => args
+                .get(2..=3)
+                .ok_or(String::from("Affine Requires 2 Ints as key"))
+                .and_then(|num_strings| {
+                    num_strings
+                        .iter()
+                        .map(|s| {
+                            s.parse::<i32>()
+                                .map_err(|_| String::from("Keys Must Be Ints"))
+                        })
+                        .collect()
+                })
+                .map(|args: Vec<i32>| {
+                    <[i32; 2]>::try_from(args).expect("We have already handeld this erro")
+                })
+                .map(|[a, b]| [Letter::from(a), Letter::from(b)])
+                .and_then(|[a, b]| {
+                    InvertableLetter::try_from(a)
+                        .map_err(|_| String::from("First value must be invertible"))
+                        .map(|a| (a, b))
+                })
+                .map(|(a, b)| {
+                    if reversed {
+                        [Letter::from(1) / -a, -b / a]
+                    } else {
+                        [Letter::from(a), b]
+                    }
+                })
+                .map(|[a, b]| {
+                    let key_func = move |c| affine(c, a, b);
+                    letter_map(Box::new(key_func))
+                }),
+            CypherType::Vigenere => args
+                .get(2)
+                .ok_or(String::from("Vigenre requires a string key"))
+                .and_then(|key| {
+                    key.chars()
+                        .map(Letter::try_from)
+                        .collect::<Result<Vec<Letter>, char>>()
+                        .map_err(|_| String::from("Key must only be letters"))
+                })
+                .map(|key| {
+                    let str_fun: Box<dyn Fn(String) -> String> =
+                        Box::new(move |s| vigenere(s, key.iter()));
+                    str_fun
+                }),
         })
 }
 
-pub fn letter_map<F: 'static>(func: F) -> Box<dyn Fn(String) -> String>
+
+fn letter_map<F: 'static>(func: F) -> Box<dyn Fn(String) -> String>
 where
     F: Fn(Letter) -> Letter,
 {
@@ -59,12 +105,21 @@ where
     Box::new(str_map)
 }
 
-pub fn shift(letter: Letter, key: i32) -> Letter {
-    letter + key.into()
+fn shift(letter: Letter, key: Letter) -> Letter {
+    letter + key
 }
 
-pub fn affine(letter: Letter, a: i32, b: i32) -> Letter {
-    letter * a.into() + b.into()
+fn affine(letter: Letter, a: Letter, b: Letter) -> Letter {
+    letter * a + b
 }
 
-
+fn vigenere(plain_text: String, key: Iter<Letter>) -> String {
+    plain_text
+        .chars()
+        .map(Letter::try_from)
+        .filter_map(|x| x.ok())
+        .zip(key)
+        .map(|(c, k)| c + *k)
+        .map(char::from)
+        .collect()
+}
